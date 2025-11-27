@@ -1,0 +1,78 @@
+@startuml Training_Pipeline
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+skinparam shadowing false
+
+title PaddleOCR v5 - Training Pipeline
+
+package "Data Preparation" as DATA #E3F2FD {
+  rectangle "Public Datasets\nICDAR, CTW1500\nMJSynth, SynthText" as PUBLIC #BBDEFB
+  rectangle "Custom Data\nInvoices, Receipts" as CUSTOM #BBDEFB
+  rectangle "Synthetic Data\nSynthText Generator" as SYNTH #BBDEFB
+
+  rectangle "Annotation\ndet_train.txt\nrec_train.txt" as ANNO #90CAF9
+
+  rectangle "Augmentation\nRotate, Crop, Blur\nColor, Distortion" as AUG #64B5F6
+
+  rectangle "Dataset Split\n80% Train\n10% Val\n10% Test" as SPLIT #42A5F5
+}
+
+PUBLIC --> ANNO
+CUSTOM --> ANNO
+SYNTH --> ANNO
+ANNO --> AUG
+AUG --> SPLIT
+
+package "Detection Training" as DET_TRAIN #E8F5E9 {
+  rectangle "Config\nResNet50 + FPN + DB\nBatch: 8, Epochs: 1200\nAdam, LR: 0.001" as DET_CFG #C8E6C9
+
+  rectangle "Loss Function\nL = BCE + 5*Dice + 10*L1\nOHEM for hard samples" as DET_LOSS #A5D6A7
+
+  rectangle "Metrics\nPrecision, Recall\nF1-Score, IoU" as DET_METRIC #81C784
+}
+
+DET_CFG --> DET_LOSS
+DET_LOSS --> DET_METRIC
+
+package "Recognition Training" as REC_TRAIN #FFEBEE {
+  rectangle "Config\nSVTR Encoder\nBatch: 128, Epochs: 100\nAdamW, LR: 5e-4" as REC_CFG #FFCDD2
+
+  rectangle "Loss Function\nCTC Loss\nLabel Smoothing: 0.1" as REC_LOSS #EF9A9A
+
+  rectangle "Metrics\nAccuracy\nEdit Distance" as REC_METRIC #E57373
+}
+
+REC_CFG --> REC_LOSS
+REC_LOSS --> REC_METRIC
+
+package "Classification Training" as CLS_TRAIN #F3E5F5 {
+  rectangle "Config\nPP-LCNet\nBatch: 256, Epochs: 100\nSGD, LR: 0.1" as CLS_CFG #E1BEE7
+
+  rectangle "Loss Function\nCross-Entropy\nFocal Loss (optional)" as CLS_LOSS #CE93D8
+
+  rectangle "Metrics\nAccuracy\nConfusion Matrix" as CLS_METRIC #AB47BC
+}
+
+CLS_CFG --> CLS_LOSS
+CLS_LOSS --> CLS_METRIC
+
+SPLIT --> DET_CFG
+SPLIT --> REC_CFG
+SPLIT --> CLS_CFG
+
+package "Export & Deploy" as DEPLOY #F5F5F5 {
+  rectangle "Model Export\n.pdmodel\n.pdiparams" as EXPORT #E0E0E0
+
+  rectangle "Optimization\nQuantization INT8\nPruning" as OPT #BDBDBD
+
+  rectangle "Deployment\nONNX Runtime\nPaddle Inference\nPaddle Lite" as RUNTIME #9E9E9E
+}
+
+DET_METRIC --> EXPORT
+REC_METRIC --> EXPORT
+CLS_METRIC --> EXPORT
+EXPORT --> OPT
+OPT --> RUNTIME
+
+@enduml

@@ -1,0 +1,198 @@
+@startuml Data_Flow
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+skinparam shadowing true
+
+title AI-INVOICE-OCR-ENGINE - Data Flow Diagram
+
+|User|
+start
+:Upload Image;
+note right
+  Supported formats:
+  * JPG, PNG, BMP
+  * PDF (multi-page)
+  * Base64 string
+end note
+
+|API Gateway|
+:Validate Request;
+:Check Authentication;
+:Rate Limiting;
+
+if (Valid Request?) then (yes)
+  :Generate Job ID;
+else (no)
+  :Return Error 401/403;
+  stop
+endif
+
+|Image Processor|
+:Load Image;
+note right
+  **load_image()**
+  cv2.imread()
+  cv2.imdecode()
+end note
+
+:Validate Format;
+:Resize Image;
+note right
+  **resize()**
+  max_side = 960px
+  keep aspect ratio
+end note
+
+:Normalize;
+note right
+  **normalize()**
+  mean = [0.485, 0.456, 0.406]
+  std = [0.229, 0.224, 0.225]
+end note
+
+|Orientation Service|
+:Classify Orientation;
+note right
+  **PPLCNet.classify()**
+  Input: [B, 3, 192, 48]
+  Output: 0/90/180/270
+end note
+
+if (Need Rotation?) then (yes)
+  :Rotate Image;
+  note right
+    **cv2.rotate()**
+  end note
+else (no)
+endif
+
+|Detection Service|
+:Text Detection;
+note right
+  **DBDetector.forward()**
+  ResNet50 + FPN + DBHead
+  Output: probability map
+end note
+
+:Post Process;
+note right
+  **postprocess()**
+  * binarize(threshold=0.3)
+  * find_contours()
+  * min_area_rect()
+  * unclip(ratio=1.5)
+end note
+
+:Get Bounding Boxes;
+note right
+  **get_boxes()**
+  List of polygons
+  [[x1,y1], [x2,y2], ...]
+end note
+
+|Recognition Service|
+:Crop Text Regions;
+note right
+  **crop_regions()**
+  Perspective transform
+  Quad -> Rectangle
+end note
+
+:Batch by Width;
+note right
+  **batch_by_width()**
+  Reduce padding waste
+end note
+
+:Text Recognition;
+note right
+  **SVTRRecognizer.forward()**
+  SVTR Encoder
+  Output: logits [B, T, 6625]
+end note
+
+:CTC Decode;
+note right
+  **ctc_decode()**
+  * argmax per timestep
+  * remove duplicates
+  * remove blanks
+  * map to characters
+end note
+
+|Result Formatter|
+:Aggregate Results;
+note right
+  **aggregate()**
+  Sort by reading order
+  (top-to-bottom, left-to-right)
+end note
+
+fork
+  :Generate JSON;
+  note right
+    **to_json()**
+    {
+      "boxes": [...],
+      "texts": [...],
+      "scores": [...]
+    }
+  end note
+fork again
+  :Draw Boxes on Image;
+  note right
+    **draw_boxes()**
+    Green polygons
+    cv2.polylines()
+  end note
+fork again
+  :Save to TXT;
+  note right
+    **to_txt()**
+    1. text1 (score)
+    2. text2 (score)
+  end note
+fork again
+  :Export Excel;
+  note right
+    **to_excel()**
+    pandas.DataFrame
+    .to_excel()
+  end note
+end fork
+
+|Database|
+:Save to PostgreSQL;
+note right
+  **save_result()**
+  INSERT INTO ocr_results
+  (id, image_path, result_json, ...)
+end note
+
+:Cache in Redis;
+note right
+  **cache_result()**
+  SET result:{job_id}
+  EXPIRE 3600
+end note
+
+:Store Image in MinIO;
+note right
+  **upload_image()**
+  bucket: ocr-images
+  path: /{date}/{job_id}.png
+end note
+
+|User|
+:Return Result;
+note right
+  {
+    "job_id": "xxx",
+    "status": "success",
+    "data": {...}
+  }
+end note
+stop
+
+@enduml

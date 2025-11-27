@@ -1,0 +1,181 @@
+@startuml OCR_Inference_Pipeline
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+skinparam shadowing false
+skinparam roundcorner 10
+
+left to right direction
+
+title <b>PaddleOCR v5 - Complete Inference Pipeline</b>\n<size:12>From Input Image to Structured Text Output</size>
+
+' ==================== INPUT SECTION ====================
+package "INPUT" as INPUT_PKG #E3F2FD {
+  rectangle "Image Input\n(JPG/PNG/BMP)" as IMG_INPUT #BBDEFB
+  rectangle "PDF Input\n(Multi-page)" as PDF_INPUT #BBDEFB
+  rectangle "URL/Base64\nInput" as URL_INPUT #BBDEFB
+
+  rectangle "<b>Image Decoder</b>\ncv2.imread()\ncv2.imdecode()\nfitz (PyMuPDF)" as DECODER #90CAF9
+}
+
+IMG_INPUT --> DECODER
+PDF_INPUT --> DECODER
+URL_INPUT --> DECODER
+
+' ==================== PREPROCESSING ====================
+package "PREPROCESSING" as PREPROCESS_PKG #FFF3E0 {
+
+  rectangle "<b>Document Orientation Classification</b>\n<size:10>Model: PP-LCNet_x1_0_doc_ori (~7MB)</size>" as DOC_ORI #FFE0B2 {
+    rectangle "Input: 192×48×3\nNormalize to [0,1]" as DOC_ORI_IN #FFF8E1
+    rectangle "PP-LCNet Backbone\nDepthwise Separable Conv\nSE (Squeeze-Excitation)" as DOC_ORI_NET #FFF8E1
+    rectangle "Output: 4 classes\n[0°, 90°, 180°, 270°]\nSoftmax probability" as DOC_ORI_OUT #FFF8E1
+  }
+
+  DOC_ORI_IN --> DOC_ORI_NET
+  DOC_ORI_NET --> DOC_ORI_OUT
+
+  rectangle "<b>Rotation Correction</b>\ncv2.rotate()\nif confidence > 0.9" as ROTATION #FFCC80
+
+  rectangle "<b>Document Unwarping</b>\n<size:10>Model: UVDoc (~32MB)</size>" as UNWARP #FFE0B2 {
+    rectangle "Input: 288×288×3\nResize & Normalize" as UNWARP_IN #FFF8E1
+    rectangle "U-Net Encoder-Decoder\n5 downsampling blocks\n5 upsampling blocks\nSkip connections" as UNWARP_NET #FFF8E1
+    rectangle "Output: Flow Map (H×W×2)\nBackward mapping (dx, dy)\ncv2.remap() for warping" as UNWARP_OUT #FFF8E1
+  }
+
+  UNWARP_IN --> UNWARP_NET
+  UNWARP_NET --> UNWARP_OUT
+}
+
+DECODER --> DOC_ORI_IN
+DOC_ORI_OUT --> ROTATION
+ROTATION --> UNWARP_IN
+
+' ==================== TEXT DETECTION ====================
+package "TEXT DETECTION" as DETECT_PKG #E8F5E9 {
+
+  rectangle "<b>Image Preprocessing</b>" as DET_PREPROCESS #C8E6C9 {
+    rectangle "Resize: keep aspect ratio\nMax side: 960px\nPadding to 32×" as DET_RESIZE #E8F5E9
+    rectangle "Normalize:\nmean=[0.485,0.456,0.406]\nstd=[0.229,0.224,0.225]" as DET_NORM #E8F5E9
+  }
+
+  DET_RESIZE --> DET_NORM
+
+  rectangle "<b>PP-OCRv5_server_det (~88MB)</b>\n<size:10>DB (Differentiable Binarization) Algorithm</size>" as DET_MODEL #A5D6A7 {
+
+    rectangle "<b>Backbone: ResNet50_vd</b>\nConv1: 7×7, stride=2 → 64ch\nStage1 (C2): 3 blocks → 256ch\nStage2 (C3): 4 blocks → 512ch\nStage3 (C4): 6 blocks → 1024ch\nStage4 (C5): 3 blocks → 2048ch" as DET_BACKBONE #C8E6C9
+
+    rectangle "<b>Neck: FPN</b>\nP5 = Conv1×1(C5) → 256ch\nP4 = Conv1×1(C4) + Upsample(P5)\nP3 = Conv1×1(C3) + Upsample(P4)\nP2 = Conv1×1(C2) + Upsample(P3)\nConcat all → 1024ch" as DET_FPN #C8E6C9
+
+    rectangle "<b>Head: DB Head (3 branches)</b>\n1. Probability Map: Conv→BN→ReLU→Conv→Sigmoid\n2. Threshold Map: Conv→BN→ReLU→Conv→Sigmoid\n3. Binary Map: B = σ((P - T) × k), k=50\n   (Differentiable during training)" as DET_HEAD #C8E6C9
+  }
+
+  DET_BACKBONE --> DET_FPN
+  DET_FPN --> DET_HEAD
+
+  rectangle "<b>Post-processing</b>" as DET_POST #81C784 {
+    rectangle "1. Binarization\n   threshold = 0.3" as POST_BIN #C8E6C9
+    rectangle "2. Morphology\n   cv2.dilate()" as POST_MORPH #C8E6C9
+    rectangle "3. Find Contours\n   cv2.findContours()" as POST_CONTOUR #C8E6C9
+    rectangle "4. Min Area Rect\n   cv2.minAreaRect()" as POST_RECT #C8E6C9
+    rectangle "5. Unclip\n   ratio = 1.5" as POST_UNCLIP #C8E6C9
+    rectangle "6. Filter\n   min_size = 3px\n   box_thresh = 0.6" as POST_FILTER #C8E6C9
+  }
+
+  POST_BIN --> POST_MORPH
+  POST_MORPH --> POST_CONTOUR
+  POST_CONTOUR --> POST_RECT
+  POST_RECT --> POST_UNCLIP
+  POST_UNCLIP --> POST_FILTER
+
+  rectangle "Output:\nList of Polygons\n[[x1,y1],[x2,y2],[x3,y3],[x4,y4]]" as DET_OUTPUT #66BB6A
+}
+
+DET_NORM --> DET_BACKBONE
+DET_HEAD --> POST_BIN
+UNWARP_OUT --> DET_RESIZE
+
+' ==================== TEXT LINE ORIENTATION ====================
+package "TEXT LINE CLASSIFICATION" as LINE_PKG #F3E5F5 {
+
+  rectangle "<b>Crop Text Regions</b>\nPerspective Transform\nQuadrilateral → Rectangle" as CROP #E1BEE7
+
+  rectangle "<b>PP-LCNet_x1_0_textline_ori (~7MB)</b>" as LINE_MODEL #CE93D8 {
+    rectangle "Input: 192×48×3\nNormalize" as LINE_IN #F3E5F5
+    rectangle "PP-LCNet\nLightweight CNN\nSE Module" as LINE_NET #F3E5F5
+    rectangle "Output: 2 classes\n[0°, 180°]\nFlip if 180°" as LINE_OUT #F3E5F5
+  }
+
+  LINE_IN --> LINE_NET
+  LINE_NET --> LINE_OUT
+}
+
+POST_FILTER --> CROP
+CROP --> LINE_IN
+
+' ==================== TEXT RECOGNITION ====================
+package "TEXT RECOGNITION" as RECOG_PKG #FFEBEE {
+
+  rectangle "<b>Image Preprocessing</b>" as REC_PREPROCESS #FFCDD2 {
+    rectangle "Resize: height=48px\nwidth proportional\nmax_width=320px" as REC_RESIZE #FFEBEE
+    rectangle "Normalize to [-1, 1]\nPadding to batch" as REC_NORM #FFEBEE
+    rectangle "Batch by width\nReduce padding waste" as REC_BATCH #FFEBEE
+  }
+
+  REC_RESIZE --> REC_NORM
+  REC_NORM --> REC_BATCH
+
+  rectangle "<b>PP-OCRv5_server_rec (~85MB)</b>\n<size:10>SVTR (Scene Text Recognition) + CTC</size>" as REC_MODEL #EF9A9A {
+
+    rectangle "<b>Patch Embedding</b>\nConv 4×2, stride 4×2\nInput: 48×320×3\nOutput: 12×80×64\n+ Positional Encoding" as REC_PATCH #FFCDD2
+
+    rectangle "<b>SVTR Stages</b>\nStage1: Local Mixing ×2 (DepthConv)\nMerge1: 12×80→6×80, 64→128ch\nStage2: Global Mixing ×4 (Attention)\nMerge2: 6×80→3×80, 128→256ch\nStage3: Mixed ×6 (Local+Global)\nMerge3: 3×80→2×80, 256→384ch\nStage4: Global ×6 (Self-Attention)" as REC_SVTR #FFCDD2
+
+    rectangle "<b>Height Compression</b>\nGlobal Avg Pool (height dim)\nOutput: 1×80×384\nSequence length = 80" as REC_COMPRESS #FFCDD2
+
+    rectangle "<b>Sequence Modeling (Optional)</b>\nBiLSTM: 2 layers, 192 units\nEnhance sequence context" as REC_LSTM #FFCDD2
+
+    rectangle "<b>CTC Head</b>\nFC: 384 → 6625 (vocab size + 1)\nOutput: 80×6625 logits\n+1 for CTC blank token" as REC_CTC #FFCDD2
+  }
+
+  REC_PATCH --> REC_SVTR
+  REC_SVTR --> REC_COMPRESS
+  REC_COMPRESS --> REC_LSTM
+  REC_LSTM --> REC_CTC
+
+  rectangle "<b>CTC Decoding</b>" as REC_DECODE #E57373 {
+    rectangle "Greedy Decode:\nargmax at each timestep\nRemove duplicates\nRemove blank tokens" as DECODE_GREEDY #FFCDD2
+    rectangle "Beam Search (optional):\nbeam_width = 10\nKeep top-k paths\nHigher accuracy" as DECODE_BEAM #FFCDD2
+    rectangle "Map to Characters:\nUsing vocab dict\nppocr_keys_v1.txt\n~6625 characters" as DECODE_MAP #FFCDD2
+  }
+
+  DECODE_GREEDY --> DECODE_MAP
+  DECODE_BEAM --> DECODE_MAP
+
+  rectangle "Output:\ntext: recognized string\nscore: confidence (0-1)" as REC_OUTPUT #E53935
+}
+
+LINE_OUT --> REC_RESIZE
+REC_BATCH --> REC_PATCH
+REC_CTC --> DECODE_GREEDY
+REC_CTC --> DECODE_BEAM
+
+' ==================== OUTPUT ====================
+package "OUTPUT" as OUTPUT_PKG #E0E0E0 {
+
+  rectangle "<b>Result Aggregation</b>\nSort by reading order\n(top-to-bottom, left-to-right)" as AGGREGATE #BDBDBD
+
+  rectangle "<b>Output Format</b>\nresult = [\n  {\n    'dt_polys': [[x1,y1],...],\n    'rec_texts': ['text1',...],\n    'rec_scores': [0.98,...]\n  }\n]" as FORMAT #9E9E9E
+
+  rectangle "Annotated Image\ndraw_ocr()\nBoxes + Text + Score" as OUT_IMG #757575
+  rectangle "JSON Export\nStructured data" as OUT_JSON #757575
+  rectangle "Excel Export\npandas DataFrame" as OUT_XLSX #757575
+}
+
+DECODE_MAP --> AGGREGATE
+DET_OUTPUT --> AGGREGATE
+AGGREGATE --> FORMAT
+FORMAT --> OUT_IMG
+FORMAT --> OUT_JSON
+FORMAT --> OUT_XLSX
+
+@enduml

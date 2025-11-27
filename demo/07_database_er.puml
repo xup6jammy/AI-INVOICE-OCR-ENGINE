@@ -1,0 +1,176 @@
+@startuml Database_ER
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+skinparam shadowing true
+skinparam linetype ortho
+
+title AI-INVOICE-OCR-ENGINE - Database ER Diagram
+
+entity "users" as USERS #C8E6C9 {
+  * **id** : UUID <<PK>>
+  --
+  * username : VARCHAR(50)
+  * email : VARCHAR(100)
+  * password_hash : VARCHAR(255)
+  * role : ENUM('admin', 'user', 'api')
+  * api_key : VARCHAR(64)
+  * api_quota : INTEGER
+  * created_at : TIMESTAMP
+  * updated_at : TIMESTAMP
+  * last_login : TIMESTAMP
+  * is_active : BOOLEAN
+}
+
+entity "ocr_jobs" as JOBS #BBDEFB {
+  * **id** : UUID <<PK>>
+  --
+  * user_id : UUID <<FK>>
+  * status : ENUM('pending', 'processing', 'completed', 'failed')
+  * priority : INTEGER
+  * created_at : TIMESTAMP
+  * started_at : TIMESTAMP
+  * completed_at : TIMESTAMP
+  * error_message : TEXT
+  * retry_count : INTEGER
+  * processing_time_ms : INTEGER
+}
+
+entity "ocr_results" as RESULTS #90CAF9 {
+  * **id** : UUID <<PK>>
+  --
+  * job_id : UUID <<FK>>
+  * image_path : VARCHAR(500)
+  * image_hash : VARCHAR(64)
+  * image_width : INTEGER
+  * image_height : INTEGER
+  * total_boxes : INTEGER
+  * result_json : JSONB
+  * confidence_avg : FLOAT
+  * created_at : TIMESTAMP
+}
+
+entity "text_boxes" as BOXES #64B5F6 {
+  * **id** : UUID <<PK>>
+  --
+  * result_id : UUID <<FK>>
+  * box_index : INTEGER
+  * polygon : JSONB
+  * text_content : TEXT
+  * confidence : FLOAT
+  * language : VARCHAR(10)
+  * box_width : INTEGER
+  * box_height : INTEGER
+}
+
+entity "invoices" as INVOICES #FFE0B2 {
+  * **id** : UUID <<PK>>
+  --
+  * result_id : UUID <<FK>>
+  * invoice_number : VARCHAR(100)
+  * invoice_date : DATE
+  * vendor_name : VARCHAR(200)
+  * vendor_tax_id : VARCHAR(50)
+  * buyer_name : VARCHAR(200)
+  * buyer_tax_id : VARCHAR(50)
+  * subtotal : DECIMAL(15,2)
+  * tax_amount : DECIMAL(15,2)
+  * total_amount : DECIMAL(15,2)
+  * currency : VARCHAR(3)
+  * extracted_at : TIMESTAMP
+}
+
+entity "invoice_items" as ITEMS #FFCC80 {
+  * **id** : UUID <<PK>>
+  --
+  * invoice_id : UUID <<FK>>
+  * item_index : INTEGER
+  * description : TEXT
+  * quantity : DECIMAL(10,2)
+  * unit_price : DECIMAL(15,2)
+  * amount : DECIMAL(15,2)
+  * tax_rate : DECIMAL(5,2)
+}
+
+entity "api_logs" as LOGS #E1BEE7 {
+  * **id** : UUID <<PK>>
+  --
+  * user_id : UUID <<FK>>
+  * endpoint : VARCHAR(200)
+  * method : VARCHAR(10)
+  * request_body : JSONB
+  * response_code : INTEGER
+  * response_time_ms : INTEGER
+  * ip_address : INET
+  * user_agent : TEXT
+  * created_at : TIMESTAMP
+}
+
+entity "model_versions" as MODELS #FFCDD2 {
+  * **id** : UUID <<PK>>
+  --
+  * model_name : VARCHAR(100)
+  * version : VARCHAR(20)
+  * model_type : ENUM('detection', 'recognition', 'classification')
+  * file_path : VARCHAR(500)
+  * file_size_mb : FLOAT
+  * accuracy : FLOAT
+  * is_active : BOOLEAN
+  * created_at : TIMESTAMP
+}
+
+entity "usage_stats" as STATS #F5F5F5 {
+  * **id** : UUID <<PK>>
+  --
+  * user_id : UUID <<FK>>
+  * date : DATE
+  * api_calls : INTEGER
+  * images_processed : INTEGER
+  * total_boxes_detected : INTEGER
+  * total_characters : INTEGER
+  * processing_time_total_ms : BIGINT
+}
+
+' Relationships
+USERS ||--o{ JOBS : "creates"
+USERS ||--o{ LOGS : "generates"
+USERS ||--o{ STATS : "has"
+
+JOBS ||--|| RESULTS : "produces"
+
+RESULTS ||--o{ BOXES : "contains"
+RESULTS ||--o| INVOICES : "extracts"
+
+INVOICES ||--o{ ITEMS : "has"
+
+note right of RESULTS
+  **result_json structure:**
+  {
+    "boxes": [[x1,y1], ...],
+    "texts": ["text1", ...],
+    "scores": [0.98, ...],
+    "languages": ["zh", ...]
+  }
+end note
+
+note right of BOXES
+  **polygon structure:**
+  [
+    [x1, y1],
+    [x2, y2],
+    [x3, y3],
+    [x4, y4]
+  ]
+end note
+
+note bottom of INVOICES
+  **Supported Invoice Fields:**
+  * Invoice Number
+  * Date
+  * Vendor Info
+  * Buyer Info
+  * Line Items
+  * Tax & Total
+end note
+
+@enduml

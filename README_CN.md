@@ -18,6 +18,29 @@
 |------|-------------|----------|
 | ![輸入](demo/invoice_en.png) | ![輸出](demo/result_invoice_en.jpg) | ![文字](demo/invoice_en_txt.png) |
 
+## 架構圖
+
+### 1. OCR 推論流程
+![OCR Pipeline](demo/1.png)
+
+### 2. 模型架構
+![Model Architecture](demo/2.png)
+
+### 3. 訓練流程
+![Training Pipeline](demo/3.png)
+
+### 4. 系統架構
+![System Architecture](demo/4.png)
+
+### 5. 資料流程
+![Data Flow](demo/5.png)
+
+### 6. 部署架構
+![Deployment](demo/6.png)
+
+### 7. 資料庫 ER 圖
+![Database ER](demo/7.png)
+
 ## 功能特色
 
 - **高準確率**：採用 PP-OCRv5 伺服器級模型，提供卓越的辨識品質
@@ -134,8 +157,8 @@ AI-INVOICE-OCR-ENGINE/
 │   ├── invoice_en.png           # 英文發票（輸入）
 │   ├── result_invoice_cn.jpg    # 中文辨識結果（輸出）
 │   ├── result_invoice_en.jpg    # 英文辨識結果（輸出）
-│   ├── invoice_cn_txt.png       # 中文文字結果
-│   └── invoice_en_txt.png       # 英文文字結果
+│   ├── 1.png ~ 7.png            # 架構圖
+│   └── *.puml                   # PlantUML 原始檔
 ├── models/
 │   └── pretrained/
 │       └── weights/             # 模型檔案 (.onnx, .pdmodel, .pdiparams)

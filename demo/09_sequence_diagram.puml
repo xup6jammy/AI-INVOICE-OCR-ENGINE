@@ -1,0 +1,171 @@
+@startuml Sequence_Diagram
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+skinparam shadowing true
+skinparam sequenceMessageAlign center
+
+title AI-INVOICE-OCR-ENGINE - API Sequence Diagram
+
+actor User as U #FFB74D
+participant "API Gateway" as API #BBDEFB
+participant "Auth Service" as AUTH #90CAF9
+participant "OCR Engine" as ENGINE #C8E6C9
+participant "Detector" as DET #A5D6A7
+participant "Recognizer" as REC #FFCDD2
+participant "Classifier" as CLS #E1BEE7
+database "PostgreSQL" as DB #CE93D8
+database "Redis" as CACHE #EF9A9A
+storage "MinIO" as STORAGE #FFE0B2
+
+== Authentication ==
+U -> API : POST /api/ocr/predict\n{image: base64, api_key: xxx}
+API -> AUTH : validateToken(api_key)
+AUTH -> DB : SELECT * FROM users\nWHERE api_key = ?
+DB --> AUTH : user_record
+AUTH --> API : {valid: true, user_id: xxx}
+
+== Check Cache ==
+API -> CACHE : GET cache:image_hash
+alt Cache Hit
+  CACHE --> API : cached_result
+  API --> U : {status: success, data: cached_result}
+else Cache Miss
+  CACHE --> API : null
+end
+
+== Image Processing ==
+API -> ENGINE : predict(image_bytes)
+activate ENGINE
+
+ENGINE -> ENGINE : _decode_image(bytes)
+note right: cv2.imdecode()
+
+ENGINE -> ENGINE : _preprocess(image)
+note right
+  resize()
+  normalize()
+end note
+
+== Orientation Classification ==
+ENGINE -> CLS : classify(image)
+activate CLS
+CLS -> CLS : forward(tensor)
+note right: PPLCNet inference
+CLS --> ENGINE : {class: 0, score: 0.99}
+deactivate CLS
+
+alt Needs Rotation
+  ENGINE -> ENGINE : cv2.rotate(image, angle)
+end
+
+== Text Detection ==
+ENGINE -> DET : detect(image)
+activate DET
+
+DET -> DET : preprocess(image)
+note right
+  DetPreprocessor
+  resize to 960px
+  normalize
+end note
+
+DET -> DET : forward(tensor)
+note right
+  DBNet inference
+  ResNet50 + FPN + DBHead
+end note
+
+DET -> DET : postprocess(pred)
+note right
+  binarize(thresh=0.3)
+  find_contours()
+  min_area_rect()
+  unclip(ratio=1.5)
+  filter(box_thresh=0.6)
+end note
+
+DET --> ENGINE : List[Box] (N boxes)
+deactivate DET
+
+== Text Recognition ==
+ENGINE -> ENGINE : crop_regions(image, boxes)
+note right
+  Perspective transform
+  for each box
+end note
+
+ENGINE -> REC : recognize_batch(cropped_images)
+activate REC
+
+REC -> REC : preprocess(images)
+note right
+  RecPreprocessor
+  resize height=48
+  batch by width
+end note
+
+REC -> REC : forward(batch)
+note right
+  SVTRNet inference
+  Output: [B, T, 6625]
+end note
+
+REC -> REC : ctc_decode(logits)
+note right
+  CTCDecoder
+  greedy_decode()
+  remove_duplicates()
+  map_to_chars()
+end note
+
+REC --> ENGINE : List[TextResult]
+deactivate REC
+
+== Result Aggregation ==
+ENGINE -> ENGINE : aggregate_results()
+note right
+  Sort by reading order
+  Combine boxes + texts
+end note
+
+ENGINE -> ENGINE : create_result()
+note right
+  Result object
+  to_json()
+  to_dict()
+end note
+
+ENGINE --> API : Result
+deactivate ENGINE
+
+== Save Results ==
+API -> STORAGE : upload(image, path)
+STORAGE --> API : image_url
+
+API -> DB : INSERT INTO ocr_results\n(job_id, result_json, ...)
+DB --> API : result_id
+
+API -> CACHE : SET cache:image_hash result\nEXPIRE 3600
+CACHE --> API : OK
+
+== Response ==
+API -> API : format_response()
+API --> U : {status: success,\njob_id: xxx,\ndata: {boxes, texts, scores}}
+
+note over U, STORAGE
+  **Response Format:**
+  {
+    "status": "success",
+    "job_id": "uuid",
+    "processing_time_ms": 234,
+    "data": {
+      "boxes": [[[x1,y1], [x2,y2], [x3,y3], [x4,y4]], ...],
+      "texts": ["text1", "text2", ...],
+      "scores": [0.98, 0.95, ...],
+      "image_url": "https://..."
+    }
+  }
+end note
+
+@enduml

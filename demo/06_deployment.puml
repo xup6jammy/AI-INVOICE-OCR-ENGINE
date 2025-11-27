@@ -1,0 +1,104 @@
+@startuml Deployment_Architecture
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+skinparam shadowing true
+
+title AI-INVOICE-OCR-ENGINE - Deployment Architecture
+
+cloud "Cloud Provider\n(AWS / GCP / Azure)" as CLOUD #E3F2FD {
+
+  node "Load Balancer\n--\nNginx / ALB\nSSL Termination\nHealth Check" as LB #BBDEFB
+
+  frame "Kubernetes Cluster" as K8S #E8F5E9 {
+
+    node "API Pod (x3)\n--\nFastAPI Server\nGunicorn Workers\n--\nReplicas: 3\nCPU: 2 cores\nMemory: 4GB" as API_POD #C8E6C9 {
+      component "api-server" as API
+      component "auth-middleware" as AUTH
+    }
+
+    node "OCR Worker Pod (x5)\n--\nOCR Engine\nModel Inference\n--\nReplicas: 5\nCPU: 4 cores\nMemory: 8GB\nGPU: 1 (optional)" as OCR_POD #A5D6A7 {
+      component "ocr-engine" as ENGINE
+      component "model-server" as MODEL
+    }
+
+    node "Celery Worker Pod (x3)\n--\nAsync Task Queue\nBatch Processing\n--\nReplicas: 3\nCPU: 2 cores\nMemory: 4GB" as CELERY_POD #81C784 {
+      component "celery-worker" as CELERY
+      component "task-scheduler" as SCHEDULER
+    }
+
+    database "Redis Cluster\n--\nCache Layer\nSession Store\nTask Queue\n--\nReplicas: 3\nMemory: 2GB" as REDIS #CE93D8
+
+    database "PostgreSQL\n--\nPrimary Database\nOCR Results\nUser Data\n--\nStorage: 100GB\nBackup: Daily" as POSTGRES #E1BEE7
+
+    storage "MinIO / S3\n--\nImage Storage\nModel Storage\nResult Files\n--\nStorage: 500GB" as MINIO #FFE0B2
+  }
+
+  node "GPU Node Pool\n--\nNVIDIA T4 / V100\nCUDA 11.x\nTensorRT" as GPU #FFCDD2
+}
+
+actor "Developer" as DEV
+actor "User" as USER
+
+node "CI/CD Pipeline\n--\nGitHub Actions\nDocker Build\nK8s Deploy" as CICD #F5F5F5 {
+  component "build" as BUILD
+  component "test" as TEST
+  component "deploy" as DEPLOY
+}
+
+node "Monitoring Stack" as MONITOR #FFF3E0 {
+  component "Prometheus\n--\nmetrics collection" as PROM
+  component "Grafana\n--\ndashboard" as GRAFANA
+  component "ELK Stack\n--\nlog analysis" as ELK
+  component "Alertmanager\n--\nalerts" as ALERT
+}
+
+' Connections
+USER --> LB : HTTPS
+LB --> API_POD : HTTP
+
+API --> AUTH
+API --> REDIS
+API --> POSTGRES
+API --> CELERY
+
+CELERY --> ENGINE
+CELERY --> REDIS
+
+ENGINE --> MODEL
+ENGINE --> MINIO
+MODEL --> GPU
+
+OCR_POD --> REDIS
+OCR_POD --> POSTGRES
+OCR_POD --> MINIO
+
+DEV --> CICD
+CICD --> K8S : kubectl apply
+
+API_POD --> PROM : /metrics
+OCR_POD --> PROM : /metrics
+PROM --> GRAFANA
+PROM --> ALERT
+API_POD --> ELK : logs
+
+note right of K8S
+  **Kubernetes Resources:**
+  * Deployment
+  * Service (ClusterIP)
+  * Ingress
+  * ConfigMap
+  * Secret
+  * HPA (Auto-scaling)
+  * PVC (Persistent Volume)
+end note
+
+note bottom of GPU
+  **GPU Acceleration:**
+  * ONNX Runtime GPU
+  * TensorRT optimization
+  * Batch inference
+  * ~10x speedup
+end note
+
+@enduml

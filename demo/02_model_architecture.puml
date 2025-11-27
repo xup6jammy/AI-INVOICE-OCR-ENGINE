@@ -1,0 +1,98 @@
+@startuml Model_Architecture
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+skinparam shadowing false
+
+title PaddleOCR v5 - Model Architecture
+
+package "Text Detection: DB Algorithm" as DET #E8F5E9 {
+  rectangle "Input Image\n[B, 3, H, W]" as DET_IN #C8E6C9
+
+  package "Backbone: ResNet50_vd" as BACKBONE #A5D6A7 {
+    rectangle "Stage 1: 256ch" as S1
+    rectangle "Stage 2: 512ch" as S2
+    rectangle "Stage 3: 1024ch" as S3
+    rectangle "Stage 4: 2048ch" as S4
+  }
+
+  package "Neck: FPN" as FPN #81C784 {
+    rectangle "P2 + P3 + P4 + P5\nConcat: 1024ch" as FPN_OUT
+  }
+
+  package "Head: DB Head" as DB_HEAD #66BB6A {
+    rectangle "Probability Map" as PROB
+    rectangle "Threshold Map" as THRESH
+    rectangle "Binary Map\nB = sigmoid((P-T)*k)" as BIN
+  }
+
+  rectangle "Output\nText Boxes" as DET_OUT #43A047
+}
+
+DET_IN --> S1
+S1 --> S2
+S2 --> S3
+S3 --> S4
+S4 --> FPN_OUT
+FPN_OUT --> PROB
+FPN_OUT --> THRESH
+PROB --> BIN
+THRESH --> BIN
+BIN --> DET_OUT
+
+package "Text Recognition: SVTR" as REC #FFEBEE {
+  rectangle "Input Image\n[B, 3, 48, W]" as REC_IN #FFCDD2
+
+  package "Patch Embedding" as PATCH #EF9A9A {
+    rectangle "Conv + Positional Encoding" as PATCH_EMB
+  }
+
+  package "SVTR Encoder" as SVTR #E57373 {
+    rectangle "Stage 1: Local Mix (64ch)" as SVTR1
+    rectangle "Stage 2: Global Mix (128ch)" as SVTR2
+    rectangle "Stage 3: Mixed (256ch)" as SVTR3
+    rectangle "Stage 4: Global Mix (384ch)" as SVTR4
+  }
+
+  package "CTC Head" as CTC #D32F2F {
+    rectangle "Height Pool" as POOL
+    rectangle "FC: 384 -> 6625" as FC
+    rectangle "CTC Decode" as CTC_DEC
+  }
+
+  rectangle "Output\nText + Score" as REC_OUT #C62828
+}
+
+REC_IN --> PATCH_EMB
+PATCH_EMB --> SVTR1
+SVTR1 --> SVTR2
+SVTR2 --> SVTR3
+SVTR3 --> SVTR4
+SVTR4 --> POOL
+POOL --> FC
+FC --> CTC_DEC
+CTC_DEC --> REC_OUT
+
+package "Orientation: PP-LCNet" as CLS #F3E5F5 {
+  rectangle "Input\n[B, 3, 192, 48]" as CLS_IN #E1BEE7
+
+  package "Backbone" as LCNET #CE93D8 {
+    rectangle "Depthwise Separable Conv" as DW
+    rectangle "SE Module" as SE
+  }
+
+  package "Head" as CLS_HEAD #AB47BC {
+    rectangle "Global Avg Pool" as GAP
+    rectangle "FC: 256 -> 4 classes" as CLS_FC
+  }
+
+  rectangle "Output\n0/90/180/270" as CLS_OUT #8E24AA
+}
+
+CLS_IN --> DW
+DW --> SE
+SE --> GAP
+GAP --> CLS_FC
+CLS_FC --> CLS_OUT
+
+@enduml

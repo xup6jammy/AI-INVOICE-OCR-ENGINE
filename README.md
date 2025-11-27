@@ -18,6 +18,29 @@ A complete AI-powered document OCR (Optical Character Recognition) solution base
 |----------|------------|-------------|
 | ![Input](demo/invoice_en.png) | ![Output](demo/result_invoice_en.jpg) | ![Text](demo/invoice_en_txt.png) |
 
+## Architecture Diagrams
+
+### 1. OCR Inference Pipeline
+![OCR Pipeline](demo/1.png)
+
+### 2. Model Architecture
+![Model Architecture](demo/2.png)
+
+### 3. Training Pipeline
+![Training Pipeline](demo/3.png)
+
+### 4. System Architecture
+![System Architecture](demo/4.png)
+
+### 5. Data Flow
+![Data Flow](demo/5.png)
+
+### 6. Deployment Architecture
+![Deployment](demo/6.png)
+
+### 7. Database ER Diagram
+![Database ER](demo/7.png)
+
 ## Features
 
 - **High Accuracy**: Utilizes PP-OCRv5 server models for superior recognition quality
@@ -134,8 +157,8 @@ AI-INVOICE-OCR-ENGINE/
 │   ├── invoice_en.png           # English invoice (input)
 │   ├── result_invoice_cn.jpg    # Chinese result (output)
 │   ├── result_invoice_en.jpg    # English result (output)
-│   ├── invoice_cn_txt.png       # Chinese text result
-│   └── invoice_en_txt.png       # English text result
+│   ├── 1.png ~ 7.png            # Architecture diagrams
+│   └── *.puml                   # PlantUML source files
 ├── models/
 │   └── pretrained/
 │       └── weights/             # Model files (.onnx, .pdmodel, .pdiparams)

@@ -1,0 +1,216 @@
+@startuml Class_Diagram
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+skinparam shadowing true
+skinparam classAttributeIconSize 0
+
+title AI-INVOICE-OCR-ENGINE - Class Diagram
+
+package "Engine" #E8F5E9 {
+  class OCREngine {
+    - _detector : Detector
+    - _recognizer : Recognizer
+    - _classifier : Classifier
+    - _config : Config
+    - _loaded : bool
+    --
+    + __init__(config: Config)
+    + predict(image: ndarray) : Result
+    + predict_batch(images: List) : List[Result]
+    + load_models() : void
+    + warmup() : void
+    - _preprocess(image: ndarray) : ndarray
+    - _postprocess(outputs: dict) : Result
+  }
+
+  class Config {
+    + det_model_path : str
+    + rec_model_path : str
+    + cls_model_path : str
+    + use_gpu : bool
+    + gpu_id : int
+    + max_batch_size : int
+    + det_db_thresh : float
+    + det_db_box_thresh : float
+    + rec_batch_num : int
+    --
+    + __init__(yaml_path: str)
+    + load_from_yaml(path: str) : void
+    + to_dict() : dict
+  }
+}
+
+package "Detection" #C8E6C9 {
+  class Detector {
+    - _model : Model
+    - _preprocessor : DetPreprocessor
+    - _postprocessor : DetPostprocessor
+    --
+    + __init__(model_path: str)
+    + detect(image: ndarray) : List[Box]
+    + forward(tensor: ndarray) : ndarray
+    - _load_model(path: str) : Model
+  }
+
+  class DetPreprocessor {
+    + target_size : int
+    + mean : List[float]
+    + std : List[float]
+    --
+    + __call__(image: ndarray) : ndarray
+    + resize(image: ndarray) : ndarray
+    + normalize(image: ndarray) : ndarray
+    + pad_to_stride(image: ndarray) : ndarray
+  }
+
+  class DetPostprocessor {
+    + thresh : float
+    + box_thresh : float
+    + unclip_ratio : float
+    --
+    + __call__(pred: ndarray, shape: tuple) : List[Box]
+    + binarize(pred: ndarray) : ndarray
+    + find_contours(binary: ndarray) : List
+    + unclip(box: ndarray) : ndarray
+    + filter_boxes(boxes: List) : List[Box]
+  }
+
+  class DBNet {
+    - backbone : ResNet50
+    - neck : FPN
+    - head : DBHead
+    --
+    + forward(x: ndarray) : dict
+    + get_prob_map(x: ndarray) : ndarray
+    + get_thresh_map(x: ndarray) : ndarray
+  }
+}
+
+package "Recognition" #FFEBEE {
+  class Recognizer {
+    - _model : Model
+    - _preprocessor : RecPreprocessor
+    - _postprocessor : CTCDecoder
+    - _vocab : Vocabulary
+    --
+    + __init__(model_path: str, vocab_path: str)
+    + recognize(images: List[ndarray]) : List[TextResult]
+    + recognize_batch(batch: ndarray) : List[TextResult]
+    + forward(tensor: ndarray) : ndarray
+  }
+
+  class RecPreprocessor {
+    + target_height : int
+    + max_width : int
+    --
+    + __call__(image: ndarray) : ndarray
+    + resize_normalize(image: ndarray) : ndarray
+    + create_batch(images: List) : ndarray
+  }
+
+  class CTCDecoder {
+    + vocab : Vocabulary
+    + blank_idx : int
+    --
+    + decode(logits: ndarray) : Tuple[str, float]
+    + greedy_decode(logits: ndarray) : List[int]
+    + beam_search(logits: ndarray, beam_width: int) : List[int]
+    + remove_duplicates(indices: List) : List[int]
+  }
+
+  class Vocabulary {
+    - _char2idx : Dict
+    - _idx2char : Dict
+    - _size : int
+    --
+    + __init__(vocab_path: str)
+    + encode(text: str) : List[int]
+    + decode(indices: List[int]) : str
+    + char2idx(char: str) : int
+    + idx2char(idx: int) : str
+    + size() : int
+  }
+
+  class SVTRNet {
+    - patch_embed : PatchEmbed
+    - stages : List[Stage]
+    - ctc_head : Linear
+    --
+    + forward(x: ndarray) : ndarray
+    + extract_features(x: ndarray) : ndarray
+  }
+}
+
+package "Classification" #F3E5F5 {
+  class Classifier {
+    - _model : Model
+    - _preprocessor : ClsPreprocessor
+    --
+    + __init__(model_path: str)
+    + classify(image: ndarray) : Tuple[int, float]
+    + forward(tensor: ndarray) : ndarray
+  }
+
+  class PPLCNet {
+    - stem : Conv2D
+    - blocks : List[DepthwiseBlock]
+    - head : Linear
+    --
+    + forward(x: ndarray) : ndarray
+  }
+}
+
+package "Data Models" #BBDEFB {
+  class Box {
+    + polygon : List[List[int]]
+    + confidence : float
+    --
+    + to_rect() : Tuple
+    + area() : float
+    + center() : Tuple[int, int]
+  }
+
+  class TextResult {
+    + text : str
+    + confidence : float
+    + box : Box
+    --
+    + to_dict() : dict
+  }
+
+  class Result {
+    + boxes : List[Box]
+    + texts : List[str]
+    + scores : List[float]
+    + image_size : Tuple[int, int]
+    --
+    + to_json() : str
+    + to_dict() : dict
+    + draw_on_image(image: ndarray) : ndarray
+    + save_txt(path: str) : void
+  }
+}
+
+' Relationships
+OCREngine *-- Detector
+OCREngine *-- Recognizer
+OCREngine *-- Classifier
+OCREngine *-- Config
+
+Detector *-- DetPreprocessor
+Detector *-- DetPostprocessor
+Detector *-- DBNet
+
+Recognizer *-- RecPreprocessor
+Recognizer *-- CTCDecoder
+Recognizer *-- Vocabulary
+Recognizer *-- SVTRNet
+
+Classifier *-- PPLCNet
+
+DetPostprocessor ..> Box : creates
+Recognizer ..> TextResult : creates
+OCREngine ..> Result : creates
+
+@enduml

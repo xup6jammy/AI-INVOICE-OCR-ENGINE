@@ -1,0 +1,148 @@
+@startuml ML_Pipeline
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+skinparam shadowing true
+
+title AI-INVOICE-OCR-ENGINE - Machine Learning Pipeline
+
+package "Data Collection" as COLLECT #E3F2FD {
+  collections "Raw Images" as RAW #BBDEFB
+  collections "Public Datasets" as PUBLIC #90CAF9
+  collections "Synthetic Data" as SYNTH #64B5F6
+
+  note bottom of RAW
+    * Invoice scans
+    * Receipt photos
+    * Document images
+  end note
+
+  note bottom of PUBLIC
+    * ICDAR 2015/2017
+    * CTW1500
+    * Total-Text
+    * MJSynth
+    * SynthText
+  end note
+
+  note bottom of SYNTH
+    Generated using:
+    * SynthText tool
+    * Custom fonts
+    * Background images
+  end note
+}
+
+package "Data Annotation" as ANNOTATE #FFF3E0 {
+  rectangle "Annotation Tools\n--\n* PPOCRLabel\n* LabelImg\n* CVAT" as TOOLS #FFE0B2
+
+  file "det_train.txt\n--\nimage_path \\t annotation\n{points, transcription}" as DET_LABEL #FFCC80
+
+  file "rec_train.txt\n--\nimage_path \\t text_label" as REC_LABEL #FFB74D
+
+  file "cls_train.txt\n--\nimage_path \\t class_id" as CLS_LABEL #FFA726
+}
+
+RAW --> TOOLS
+PUBLIC --> DET_LABEL
+PUBLIC --> REC_LABEL
+SYNTH --> REC_LABEL
+TOOLS --> DET_LABEL
+TOOLS --> REC_LABEL
+TOOLS --> CLS_LABEL
+
+package "Data Preprocessing" as PREPROCESS #E8F5E9 {
+  rectangle "Image Augmentation\n--\n+ RandomRotate(10°)\n+ RandomCrop()\n+ ColorJitter()\n+ GaussianBlur()\n+ MotionBlur()\n+ RandomErasing()" as AUG #C8E6C9
+
+  rectangle "Data Validation\n--\n+ check_image_format()\n+ validate_annotations()\n+ remove_corrupted()\n+ balance_classes()" as VALIDATE #A5D6A7
+
+  rectangle "Dataset Split\n--\n+ train: 80%\n+ val: 10%\n+ test: 10%\n+ stratified_split()" as SPLIT #81C784
+
+  rectangle "DataLoader\n--\n+ batch_size: 32\n+ shuffle: True\n+ num_workers: 4\n+ collate_fn()" as LOADER #66BB6A
+}
+
+DET_LABEL --> AUG
+REC_LABEL --> AUG
+CLS_LABEL --> AUG
+AUG --> VALIDATE
+VALIDATE --> SPLIT
+SPLIT --> LOADER
+
+package "Model Training" as TRAIN #FFEBEE {
+
+  rectangle "Detection Model\n--\nDBNet (ResNet50 + FPN)\n--\n+ optimizer: Adam\n+ lr: 0.001\n+ epochs: 1200\n+ loss: BCE + Dice" as DET_TRAIN #FFCDD2
+
+  rectangle "Recognition Model\n--\nSVTR Encoder + CTC\n--\n+ optimizer: AdamW\n+ lr: 5e-4\n+ epochs: 100\n+ loss: CTC Loss" as REC_TRAIN #EF9A9A
+
+  rectangle "Classification Model\n--\nPP-LCNet\n--\n+ optimizer: SGD\n+ lr: 0.1\n+ epochs: 100\n+ loss: CrossEntropy" as CLS_TRAIN #E57373
+
+  rectangle "Training Loop\n--\nfor epoch in epochs:\n  for batch in dataloader:\n    pred = model(batch)\n    loss = criterion(pred, label)\n    loss.backward()\n    optimizer.step()\n    scheduler.step()" as LOOP #D32F2F
+}
+
+LOADER --> DET_TRAIN
+LOADER --> REC_TRAIN
+LOADER --> CLS_TRAIN
+DET_TRAIN --> LOOP
+REC_TRAIN --> LOOP
+CLS_TRAIN --> LOOP
+
+package "Experiment Tracking" as TRACK #F3E5F5 {
+  rectangle "MLflow / W&B\n--\n+ log_params()\n+ log_metrics()\n+ log_artifacts()\n+ save_model()" as MLFLOW #E1BEE7
+
+  rectangle "Metrics\n--\nDetection:\n  * Precision, Recall, F1\n  * IoU, mAP\nRecognition:\n  * Accuracy\n  * Edit Distance\n  * CER, WER" as METRICS #CE93D8
+
+  rectangle "Checkpoints\n--\n+ save_best_model()\n+ early_stopping()\n+ model_checkpoint()" as CKPT #AB47BC
+}
+
+LOOP --> MLFLOW
+LOOP --> METRICS
+LOOP --> CKPT
+
+package "Model Evaluation" as EVAL #E0E0E0 {
+  rectangle "Test Dataset\n--\n+ held-out test set\n+ cross-validation\n+ real-world samples" as TEST_DATA #BDBDBD
+
+  rectangle "Evaluation\n--\n+ model.eval()\n+ inference(test_data)\n+ compute_metrics()\n+ confusion_matrix()" as EVALUATE #9E9E9E
+
+  rectangle "Error Analysis\n--\n+ bad_case_analysis()\n+ visualize_errors()\n+ identify_patterns()" as ERROR #757575
+}
+
+CKPT --> TEST_DATA
+TEST_DATA --> EVALUATE
+EVALUATE --> ERROR
+
+package "Model Optimization" as OPT #FFEBEE {
+  rectangle "Quantization\n--\n+ post_training_quant()\n+ FP32 → INT8\n+ size: 4x smaller\n+ speed: 2x faster" as QUANT #FFCDD2
+
+  rectangle "Pruning\n--\n+ channel_pruning()\n+ sensitivity_analysis()\n+ fine_tune()" as PRUNE #EF9A9A
+
+  rectangle "Knowledge Distillation\n--\n+ teacher_model\n+ student_model\n+ distill_loss()" as DISTILL #E57373
+}
+
+EVALUATE --> QUANT
+QUANT --> PRUNE
+PRUNE --> DISTILL
+
+package "Model Export" as EXPORT #C8E6C9 {
+  file "model.pdmodel\n(structure)" as PDMODEL #A5D6A7
+  file "model.pdiparams\n(weights)" as PDPARAMS #81C784
+  file "model.onnx\n(portable)" as ONNX #66BB6A
+}
+
+DISTILL --> PDMODEL
+DISTILL --> PDPARAMS
+DISTILL --> ONNX
+
+package "Deployment" as DEPLOY #BBDEFB {
+  node "Paddle Inference\n(Server)" as PADDLE #90CAF9
+  node "ONNX Runtime\n(Cross-platform)" as ORT #64B5F6
+  node "Paddle Lite\n(Mobile/Edge)" as LITE #42A5F5
+  node "TensorRT\n(GPU optimized)" as TRT #1E88E5
+}
+
+PDMODEL --> PADDLE
+PDPARAMS --> PADDLE
+ONNX --> ORT
+ONNX --> TRT
+PDMODEL --> LITE
+
+@enduml

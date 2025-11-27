@@ -1,0 +1,100 @@
+@startuml System_Architecture
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam defaultFontName Arial
+skinparam shadowing true
+skinparam roundcorner 15
+
+title AI-INVOICE-OCR-ENGINE - System Architecture
+
+actor "User" as USER #FFB74D
+actor "Admin" as ADMIN #FF8A65
+
+cloud "Internet" as INTERNET #E3F2FD {
+}
+
+package "Frontend Layer" as FRONTEND #E8F5E9 {
+  rectangle "Web Application\n--\n+ uploadImage()\n+ displayResult()\n+ exportPDF()\n+ exportExcel()" as WEBAPP #C8E6C9
+
+  rectangle "Mobile App\n--\n+ capturePhoto()\n+ scanDocument()\n+ viewHistory()" as MOBILE #A5D6A7
+
+  rectangle "API Client\n--\n+ sendRequest()\n+ getResult()\n+ batchProcess()" as API_CLIENT #81C784
+}
+
+package "API Gateway" as GATEWAY #BBDEFB {
+  rectangle "REST API\n--\nPOST /api/ocr/predict\nPOST /api/ocr/batch\nGET /api/ocr/result/{id}\nGET /api/ocr/history" as REST #90CAF9
+
+  rectangle "Authentication\n--\n+ validateToken()\n+ checkPermission()\n+ rateLimit()" as AUTH #64B5F6
+
+  rectangle "Load Balancer\n--\n+ distributeRequest()\n+ healthCheck()\n+ failover()" as LB #42A5F5
+}
+
+package "Application Layer" as APP #FFF3E0 {
+  rectangle "OCR Engine\n--\n+ predict(image)\n+ detect_text()\n+ recognize_text()\n+ classify_orientation()" as ENGINE #FFE0B2
+
+  rectangle "Image Processor\n--\n+ resize()\n+ normalize()\n+ rotate()\n+ crop_regions()" as IMG_PROC #FFCC80
+
+  rectangle "Result Formatter\n--\n+ to_json()\n+ to_excel()\n+ to_pdf()\n+ draw_boxes()" as FORMATTER #FFB74D
+
+  rectangle "Queue Manager\n--\n+ enqueue()\n+ dequeue()\n+ getStatus()\n+ cancelJob()" as QUEUE #FFA726
+}
+
+package "ML Service Layer" as ML #FFEBEE {
+  rectangle "Model Server\n--\n+ load_model()\n+ inference()\n+ warm_up()\n+ get_metrics()" as MODEL_SERVER #FFCDD2
+
+  rectangle "Text Detection\n--\nDBDetector\n+ forward()\n+ postprocess()\n+ get_boxes()" as DET_SERVICE #EF9A9A
+
+  rectangle "Text Recognition\n--\nSVTRRecognizer\n+ forward()\n+ ctc_decode()\n+ get_text()" as REC_SERVICE #E57373
+
+  rectangle "Orientation\n--\nPPLCNet\n+ classify()\n+ rotate_image()" as ORI_SERVICE #EF5350
+}
+
+database "Database Layer" as DB #F3E5F5 {
+  rectangle "PostgreSQL\n--\nusers\nocr_results\nocr_history\napi_logs" as POSTGRES #E1BEE7
+
+  rectangle "Redis Cache\n--\n+ cacheResult()\n+ getCache()\n+ setExpiry()" as REDIS #CE93D8
+
+  rectangle "MinIO Storage\n--\n+ uploadImage()\n+ downloadImage()\n+ deleteImage()" as MINIO #AB47BC
+}
+
+package "Model Storage" as MODEL_STORE #E0E0E0 {
+  folder "Pretrained Models" as MODELS {
+    file "pp-ocrv5-det.onnx" as DET_MODEL
+    file "pp-ocrv5-rec.onnx" as REC_MODEL
+    file "pp-lcnet.onnx" as CLS_MODEL
+  }
+}
+
+' Connections
+USER --> INTERNET
+ADMIN --> INTERNET
+INTERNET --> WEBAPP
+INTERNET --> MOBILE
+INTERNET --> API_CLIENT
+
+WEBAPP --> REST
+MOBILE --> REST
+API_CLIENT --> REST
+
+REST --> AUTH
+AUTH --> LB
+LB --> ENGINE
+
+ENGINE --> IMG_PROC
+ENGINE --> MODEL_SERVER
+ENGINE --> FORMATTER
+ENGINE --> QUEUE
+
+MODEL_SERVER --> DET_SERVICE
+MODEL_SERVER --> REC_SERVICE
+MODEL_SERVER --> ORI_SERVICE
+
+DET_SERVICE --> DET_MODEL
+REC_SERVICE --> REC_MODEL
+ORI_SERVICE --> CLS_MODEL
+
+ENGINE --> POSTGRES
+ENGINE --> REDIS
+ENGINE --> MINIO
+
+@enduml
